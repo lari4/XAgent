@@ -691,3 +691,170 @@ function_prompt: |
 
 ---
 
+## Inline Prompts
+
+Промты, встроенные непосредственно в Python код для динамической генерации сообщений.
+
+### 1. Message History - Running Summary
+
+**Файл:** `XAgent/message_history.py`
+
+**Назначение:** Создает сжатое резюме действий и результатов информации, фокусируясь на ключевой и потенциально важной информации для запоминания. Используется для управления контекстом беседы.
+
+**Местоположение в коде:** XAgent/message_history.py:335-348
+
+**Промт:**
+```python
+prompt = f'''Your task is to create a concise running summary of actions and information results in the provided text, focusing on key and potentially important information to remember.
+
+You will receive the current summary and the your latest actions. Combine them, adding relevant key information from the latest development in 1st person past tense and keeping the summary concise.
+
+Summary So Far:
+"""
+{self.summary}
+"""
+
+Latest Development:
+"""
+{new_events or "Nothing new happened."}
+"""
+'''
+```
+
+**Плейсхолдеры:**
+- `{self.summary}` - текущее резюме
+- `{new_events}` - новые события/действия
+
+---
+
+### 2. Summarization System - All Messages
+
+**Файл:** `XAgent/summarization_system.py`
+
+**Назначение:** Создает сжатое резюме всех действий из списка сообщений. Используется для полной суммаризации всего списка сообщений.
+
+**Местоположение в коде:** XAgent/summarization_system.py:137-150
+
+**Промт:**
+```python
+system_prompt = f'''Your task is to create a concise running summary of actions and information results in the provided text, focusing on key and potentially important information to remember.
+
+You will receive the current summary and the your latest actions. Combine them, adding relevant key information from the latest development in 1st person past tense and keeping the summary concise.
+
+Latest Development:
+"""
+{[message.content for message in message_list] or "Nothing new happened."}
+"""
+'''
+```
+
+**Плейсхолдеры:**
+- `{message_list}` - список всех сообщений для суммаризации
+
+---
+
+### 3. Summarization System - Recursive
+
+**Файл:** `XAgent/summarization_system.py`
+
+**Назначение:** Рекурсивно создает резюме, комбинируя существующее резюме с новым сообщением. Используется для инкрементальной суммаризации.
+
+**Местоположение в коде:** XAgent/summarization_system.py:155-173
+
+**Промт:**
+```python
+system_prompt = f'''Your task is to create a concise running summary of actions and information results in the provided text, focusing on key and potentially important information to remember.
+
+You will receive the current summary and the your latest actions. Combine them, adding relevant key information from the latest development in 1st person past tense and keeping the summary concise.
+
+Summary So Far:
+"""
+{father_summarize_node.summarization_from_root_to_here}
+"""
+
+Latest Development:
+"""
+{[message.content for message in new_message] or "Nothing new happened."}
+"""
+'''
+```
+
+**Плейсхолдеры:**
+- `{father_summarize_node.summarization_from_root_to_here}` - резюме от корня до текущего узла
+- `{new_message}` - новое сообщение для добавления в резюме
+
+---
+
+### 4. ReACT Search - Subtask Handling
+
+**Файл:** `XAgent/inner_loop_search_algorithms/ReACT.py`
+
+**Назначение:** Генерирует сообщения для каждого узла в процессе поиска ReACT. Информирует агент о текущей подзадаче и уже выполненных шагах.
+
+**Местоположение в коде:** XAgent/inner_loop_search_algorithms/ReACT.py:13-53
+
+**Промт - константа NOW_SUBTASK_PROMPT:**
+```python
+NOW_SUBTASK_PROMPT = '''
+
+'''
+```
+**Примечание:** Эта константа пуста, фактический промт генерируется динамически.
+
+**Промт - динамическая генерация в make_message():**
+```python
+now_subtask_prompt = f'''Now you will perform the following subtask:\n"""\n{terminal_task_info}\n"""\n'''
+
+user_prompt = f"""The following steps have been performed (you have already done the following and the current file contents are shown below):
+{action_process}
+"""
+```
+
+**Плейсхолдеры:**
+- `{terminal_task_info}` - информация о текущей подзадаче (резюме или полный JSON)
+- `{action_process}` - процесс выполненных действий (резюме или полный процесс)
+
+**Контекст:**
+- Если `CONFIG.enable_summary` включен, используется суммаризированная версия
+- Сообщения формируют последовательность для агента Tool Agent
+
+---
+
+## Резюме промтов по категориям
+
+### Планирование и управление задачами
+- **Plan Generate Agent**: Декомпозиция запроса на подзадачи
+- **Plan Refine Agent**: Итеративное уточнение плана
+- **Task Management Functions**: Операции с подзадачами (split, add, delete, exit)
+
+### Выполнение задач
+- **Tool Agent**: Основной исполнительный агент с доступом к инструментам
+- **Task Handle Functions**: Обработка подзадач, вызов инструментов
+- **ReACT Search**: Цепочечный поиск решений
+
+### Рефлексия и обучение
+- **Reflect Agent**: Извлечение апостериорных знаний
+- **Summarize Action(s)**: Суммаризация выполненных действий
+- **Actions Reflection**: Отбор ключевых действий и предложения
+- **Generate Posterior Knowledge**: Схема для извлечения знаний
+
+### Обработка информации
+- **Parse Web Text**: Парсинг веб-страниц
+- **Summarization System**: Создание сжатых резюме
+- **Message History**: Управление контекстом беседы
+
+### Метапромты
+- **Dispatcher Agent**: Генерация и уточнение промтов для агентов
+
+### Коммуникация
+- **Chat with Other Subtask**: Чат между агентами разных подзадач
+- **Ask Human for Help**: Запрос помощи у человека
+
+---
+
+**Общее количество задокументированных промтов:** 25+
+
+**Формат плейсхолдеров:**
+- `{{placeholder}}` - двойные фигурные скобки (Agent prompts)
+- `{placeholder}` - одинарные фигурные скобки (YAML и inline prompts)
+
