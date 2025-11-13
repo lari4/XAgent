@@ -382,3 +382,312 @@ Now show your super capability as a super agent that beyond regular AIs or LLMs!
 
 ---
 
+## AI Function Prompts
+
+YAML-определенные функции для специализированных задач обработки и анализа.
+
+### 1. Summarize Action
+
+**Файл:** `XAgent/ai_functions/functions/summarize_action.yml`
+
+**Назначение:** Суммирует отдельное выполненное действие с критическим мышлением. Анализирует действие, его результат и создает краткое описание.
+
+**Местоположение в коде:** XAgent/ai_functions/functions/summarize_action.yml:1-9
+
+**Промт:**
+```yaml
+function_prompt: |
+  Your task is to summarize a given action with careful and critical thinking.
+
+  --- Current Task ---
+  {current_task}
+  --- Performed Action ---
+  {action}
+
+  Make sure your answer is in standard json format, start!
+```
+
+**Выходные параметры:**
+- `summary` (string, required): Краткое резюме действия (~30 слов)
+- `description` (string, required): Детальное описание thought, reasoning, plan, criticism, tool_status_code и результата (~80 слов)
+- `failed_reason_and_reflection` (string, optional): Причина неудачи и рефлексия, если действие провалилось
+
+**Плейсхолдеры:**
+- `{current_task}` - текущая задача
+- `{action}` - выполненное действие
+
+---
+
+### 2. Summarize Actions
+
+**Файл:** `XAgent/ai_functions/functions/summarize_actions.yml`
+
+**Назначение:** Суммирует список выполненных действий в порядке их выполнения. Классифицирует действия на три категории: успешные (succeed), провалившиеся (failed) и полезные (useful). Сохраняет всю ключевую информацию.
+
+**Местоположение в коде:** XAgent/ai_functions/functions/summarize_actions.yml:1-10
+
+**Промт:**
+```yaml
+function_prompt: |
+  Your task is to list and summarize the actions of the steps in order, keep all key information to remember.
+  You need first classify the actions into three categories: succeed actions, failed actions, and useful actions. You should check the `tool_status_code` of each action in the Action List, and then classify them into the three categories.
+
+  --- Current Task ---
+  {current_task}
+  --- Performed Action List ---
+  {actions}
+
+  Start!
+```
+
+**Выходные параметры:**
+- `actions_description` (array, required): Список описаний действий (равен длине списка действий)
+  - `index` (integer): индекс действия
+  - `summary` (string): краткое резюме (~30 слов)
+  - `description` (string): детальное описание (~50 слов)
+- `recent_failed_actions_reflection` (array, max 3): Рефлексия по недавним провалившимся действиям
+- `key_actions` (array, max 5): Индексы ключевых действий с важным контентом
+- `suggestions` (array, max 3): Предложения для будущих действий
+
+**Плейсхолдеры:**
+- `{current_task}` - текущая задача
+- `{actions}` - список выполненных действий
+
+---
+
+### 3. Parse Web Text
+
+**Файл:** `XAgent/ai_functions/functions/parse_web_text.yml`
+
+**Назначение:** Парсит текст веб-страницы с использованием промта. Извлекает релевантную информацию, создает резюме и находит полезные гиперссылки.
+
+**Модель:** gpt-3.5-turbo-16k, temperature: 0.6
+
+**Местоположение в коде:** XAgent/ai_functions/functions/parse_web_text.yml:5-11
+
+**Промт:**
+```yaml
+function_prompt: |
+  I will give you the text gathered from a webpage and a prompt to help you parse it, please remember that the content you provide should be as same language as the webpage you are parsing.
+  -- Webpage --
+    {webpage}
+  -- Prompt --
+    {prompt}
+  Action!
+```
+
+**Выходные параметры:**
+- `summary` (string, required): Резюме веб-страницы (~50 слов) со всей важной информацией
+- `related_details` (string, required): Все детали веб-страницы, связанные с промтом (максимум 400 слов)
+- `useful_hyperlinks` (array, required, max 3): Полезные гиперссылки из веб-страницы
+
+**Плейсхолдеры:**
+- `{webpage}` - текст веб-страницы
+- `{prompt}` - промт для парсинга
+
+---
+
+### 4. Actions Reflection
+
+**Файл:** `XAgent/ai_functions/functions/actions_reflection.yml`
+
+**Назначение:** Выбирает ключевые действия, которые решают или соответствуют целям этапа текущей задачи. Предоставляет предложения для будущих действий на основе успехов и неудач.
+
+**Местоположение в коде:** XAgent/ai_functions/functions/actions_reflection.yml:1-10
+
+**Промт:**
+```yaml
+function_prompt: |
+  Your task is to select key actions that solve or meet the stage goal of the current task. The output of key actions will be provided to solve further tasks.
+  After that you should give suggestions for future actions.
+
+  --- Current Task ---
+  {current_task}
+  --- Performed Actions ---
+  {actions}
+
+  Make sure your answer is in standard json format, start!
+```
+
+**Выходные параметры:**
+- `key_actions` (array, required, max 5): Индексы ключевых успешных действий с важным контентом
+- `suggestions` (array, required, max 3): Предложения для будущих действий
+
+**Плейсхолдеры:**
+- `{current_task}` - текущая задача
+- `{actions}` - выполненные действия
+
+---
+
+## Pure Function Prompts
+
+Чистые функции для управления задачами, рассуждения и коммуникации между агентами.
+
+### 1. Reasoning Functions
+
+**Файл:** `XAgent/ai_functions/pure_functions/reasoning.yml`
+
+**Назначение:** Предоставляет функции для рассуждения агента при вызове инструментов.
+
+#### 1.1 action_reasoning
+
+**Местоположение в коде:** XAgent/ai_functions/pure_functions/reasoning.yml:2-22
+
+**Описание:** Предоставляет детальное рассуждение вместе с вызовом инструмента.
+
+**Параметры:**
+- `plan` (array, required): Что делать дальше (максимум 1 элемент, ~30 слов)
+- `thought` (string, required): Внутреннее рассуждение и мысли (~50 слов)
+- `reasoning` (string, required): Почему выбрана эта мысль (~100 слов)
+- `criticism` (string, required): Конструктивная самокритика текущей мысли и плана
+
+#### 1.2 simple_thought
+
+**Местоположение в коде:** XAgent/ai_functions/pure_functions/reasoning.yml:23-30
+
+**Описание:** Упрощенный процесс мышления.
+
+**Параметры:**
+- `thought` (string, required): Почему выбрана эта операция и что делать дальше
+
+---
+
+### 2. Generate Posterior Knowledge
+
+**Файл:** `XAgent/ai_functions/pure_functions/generate_posterior_knowledge.yml`
+
+**Назначение:** Схема функции для извлечения апостериорных знаний после выполнения подзадачи. Используется Reflect Agent.
+
+**Местоположение в коде:** XAgent/ai_functions/pure_functions/generate_posterior_knowledge.yml:1-24
+
+**Параметры:**
+- `summary` (string, required): Резюме выполненного процесса
+- `reflection_of_plan` (array of strings, optional): Рефлексия по планированию
+- `reflection_of_tool` (array of objects, optional): Рефлексия по использованию инструментов
+  - `target_tool_name` (string): Имя инструмента
+  - `reflection` (array of strings): Рефлексия по инструменту
+
+---
+
+### 3. Chat with Other Subtask
+
+**Файл:** `XAgent/ai_functions/pure_functions/chat_with_other_subtask.yml`
+
+**Назначение:** Многораундовый чат между агентами, обрабатывающими разные подзадачи. Позволяет текущему агенту обсудить проблемы с агентом, который обрабатывал предыдущую подзадачу.
+
+**Местоположение в коде:** XAgent/ai_functions/pure_functions/chat_with_other_subtask.yml:1-12
+
+**Параметры:**
+- `target_subtask_id` (string, required): ID подзадачи для чата (например, '1.2', '2', '3.5.2'). Должна быть подзадача до текущей
+- `question` (string, required): Вопрос агенту. История вопросов и ответов сохраняется
+
+---
+
+### 4. Task Management Functions
+
+**Файл:** `XAgent/ai_functions/pure_functions/task_manage_functions.yml`
+
+**Назначение:** Функции для управления и уточнения плана задач.
+
+#### 4.1 refine_submit_operation
+
+**Местоположение в коде:** XAgent/ai_functions/pure_functions/task_manage_functions.yml:23-31
+
+**Описание:** Выход из режима уточнения плана, если план не требует дальнейших изменений.
+
+**Параметры:**
+- `content` (string, required): Сообщение пользователю
+
+#### 4.2 subtask_split_operation
+
+**Местоположение в коде:** XAgent/ai_functions/pure_functions/task_manage_functions.yml:32-44
+
+**Описание:** Разделяет целевую подзадачу на подзадачи. Можно разделять только провалившиеся задачи (status==FAIL).
+
+**Параметры:**
+- `target_subtask_id` (string, required): ID подзадачи для разделения (например, '1.2', '2.3.3', '4')
+- `subtasks` (array, required, 1-3 элемента): Массив разделенных подзадач
+
+**Структура подзадачи:**
+- `subtask name` (string): Имя подзадачи
+- `goal` (object): Цель подзадачи
+  - `goal` (string): Основная цель и действия для её достижения
+  - `criticism` (string): Потенциальные проблемы подзадачи
+- `milestones` (array of strings): Как автоматически проверить, что подзадача выполнена
+
+#### 4.3 subtask_operations
+
+**Местоположение в коде:** XAgent/ai_functions/pure_functions/task_manage_functions.yml:45-60
+
+**Описание:** Изменяет подзадачи с помощью операций: split, add, delete, exit.
+
+**Параметры:**
+- `operation` (string, required, enum): Тип операции - "split", "add", "delete", "exit"
+- `target_subtask_id` (string, required): ID подзадачи для операции
+- `subtasks` (array, max 2): Массив новых подзадач (не используется для delete)
+
+**Правила операций:**
+- **split**: Целевая подзадача должна быть листовым узлом и будущим узлом
+- **add**: Расширяет ширину дерева плана, добавляя братские узлы
+- **delete**: Удаляет будущую/TODO подзадачу (не текущую или выполненную)
+- **exit**: Выходит из режима уточнения плана
+
+---
+
+### 5. Task Handle Functions
+
+**Файл:** `XAgent/ai_functions/pure_functions/task_handle_functions.yml`
+
+**Назначение:** Функции для обработки подзадач, взаимодействия с инструментами и запроса помощи.
+
+#### 5.1 subtask_submit
+
+**Местоположение в коде:** XAgent/ai_functions/pure_functions/task_handle_functions.yml:2-37
+
+**Описание:** Отправка результатов подзадачи в конце процесса обработки с предложениями для плана.
+
+**Параметры:**
+- `result` (object, required):
+  - `conclusion` (string): Резюме выполненного (~400 слов) с ключевыми вехами
+  - `milestones` (array of strings): Промежуточные файлы или мысли, представляющие результаты
+  - `success` (boolean): Решена ли подзадача
+- `submit_type` (string, required, enum): Причина отправки - "give_answer", "give_up", "max_tool_call", "human_suggestion"
+- `suggestions_for_latter_subtasks_plan` (object, required):
+  - `need_for_plan_refine` (boolean): Нужно ли уточнять план
+  - `reason` (string): Детальные предложения по уточнению плана (~50 слов)
+
+#### 5.2 subtask_handle
+
+**Местоположение в коде:** XAgent/ai_functions/pure_functions/task_handle_functions.yml:38-71
+
+**Описание:** Обработка подзадачи с рассуждением и вызовом инструмента.
+
+**Параметры:**
+- `plan` (array, required, max 1): Общий план будущих действий (~30 слов)
+- `thought` (string, required): Внутреннее рассуждение (~50 слов)
+- `reasoning` (string, required): Обоснование мысли (~100 слов)
+- `criticism` (string, required): Конструктивная самокритика
+- `tool_call` (object, required):
+  - `tool_name` (string): Имя инструмента из AVAILABLE_TOOLS
+  - `tool_input` (object or string): Входные данные в формате JSON
+
+#### 5.3 ask_human_for_help
+
+**Местоположение в коде:** XAgent/ai_functions/pure_functions/task_handle_functions.yml:72-84
+
+**Описание:** Единственный инструмент для взаимодействия с человеком. Используется только когда невозможно продолжить без помощи (нужны аккаунт, API ключ, уточнение требований и т.д.).
+
+**Параметры:**
+- `requirement` (string, required): Что нужно от человека (должно быть очень конкретным)
+- `requirement_type` (string, required, enum): Тип требования - "give_information", "other_type"
+
+#### 5.4 human_interruption
+
+**Местоположение в коде:** XAgent/ai_functions/pure_functions/task_handle_functions.yml:85-91
+
+**Описание:** Алиас-функция для предложений от человека во время обработки задачи. Агент никогда не вызывает эту функцию сам - она получается от человека.
+
+**Параметры:** Нет требуемых параметров
+
+---
+
