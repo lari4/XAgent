@@ -671,6 +671,454 @@ DATA PASSED TO NEXT STAGE:
 
 ---
 
+### Pipeline 3: Reflect Agent Pipeline
+
+**Цель:** Извлечь апостериорные знания из выполненной подзадачи для обучения и улучшения будущего планирования.
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                    REFLECT AGENT PIPELINE                           │
+│                  (Posterior Knowledge Extraction)                   │
+└─────────────────────────────────────────────────────────────────────┘
+
+INPUT DATA:
+┌────────────────────────────────────────────────────────────────┐
+│ Completed Subtask Data                                         │
+│ ├─ now_dealing_task: Plan node (just completed)               │
+│ │   ├─ subtask_id: "1", "2.3", etc.                          │
+│ │   ├─ goal: {goal, criticism}                                │
+│ │   └─ process_node: ToolNode tree (execution trace)          │
+│ │                                                              │
+│ ├─ all_plan: Complete plan structure (для контекста)          │
+│ └─ tool_functions: List of available tools                     │
+└────────────────────────────────────────────────────────────────┘
+        ↓
+┌────────────────────────────────────────────────────────────────┐
+│ STEP 1: Get Posterior Knowledge Trigger                       │
+└────────────────────────────────────────────────────────────────┘
+        TaskHandler.posterior_process(now_dealing_task)
+        ├─ Called after subtask execution completes
+        └─ Before plan refinement
+        ↓
+┌────────────────────────────────────────────────────────────────┐
+│ STEP 2: Dispatch Reflect Agent                                │
+└────────────────────────────────────────────────────────────────┘
+        AgentDispatcher.dispatch(RequiredAbilities.reflection)
+        ↓
+        Create ReflectAgent with configuration
+        ↓
+┌────────────────────────────────────────────────────────────────┐
+│ STEP 3: Prepare System Prompt                                 │
+└────────────────────────────────────────────────────────────────┘
+        SYSTEM_PROMPT (from reflect_agent/prompt.py):
+        ┌──────────────────────────────────────────────────────┐
+        │ You are a posterior_knowledge_obtainer.              │
+        │ You have performed subtask with:                      │
+        │ 1. Intermediate thoughts (reasoning path)             │
+        │ 2. Tool calls (interact with physical world)          │
+        │ 3. Workspace (minimal file system + code executer)    │
+        │                                                       │
+        │ You plan of the task is as follows:                   │
+        │ --- Plan ---                                          │
+        │ {{all_plan}}                                         │
+        │    ← FILLED WITH: Complete plan tree JSON            │
+        │                                                       │
+        │ You have handled the following subtask:               │
+        │ --- Handled Subtask ---                               │
+        │ {{terminal_plan}}                                    │
+        │    ← FILLED WITH: Completed subtask info             │
+        │                                                       │
+        │ the available tools are as follows:                   │
+        │ --- Tools ---                                         │
+        │ {{tool_functions_description_list}}                 │
+        │    ← FILLED WITH: Tool descriptions                  │
+        │                                                       │
+        │ The following steps have been performed:              │
+        │ --- Actions ---                                       │
+        │ {{action_process}}                                   │
+        │    ← FILLED WITH: ToolNode tree → actions list       │
+        │                                                       │
+        │ Now, learn posterior knowledge:                       │
+        │                                                       │
+        │ 1. Summary: Summarize tool calls and thoughts.        │
+        │    This will carry to next subtasks.                  │
+        │    If modified files, tell file_name and what done.   │
+        │                                                       │
+        │ 2. Reflection of SUBTASK_PLAN:                        │
+        │    Knowledge for generating plan next time.           │
+        │                                                       │
+        │ 3. Reflection of tool calling:                        │
+        │    What learned about tool usage?                     │
+        │    (e.g., "tool xxx not available", "need field yyy") │
+        └──────────────────────────────────────────────────────┘
+        ↓
+┌────────────────────────────────────────────────────────────────┐
+│ STEP 4: Prepare User Prompt                                   │
+└────────────────────────────────────────────────────────────────┘
+        USER_PROMPT = "" (empty, uses only system prompt)
+        ↓
+┌────────────────────────────────────────────────────────────────┐
+│ STEP 5: Extract Action Process                                │
+└────────────────────────────────────────────────────────────────┘
+        Convert ToolNode tree to action list:
+        ├─ Traverse process_node (ToolNode tree)
+        ├─ For each node: extract thought, tool_call, observation
+        └─ Format as sequential list of actions
+
+        Example action_process:
+        """
+        Step 1:
+          Thought: I need to search for information
+          Tool: WebSearch
+          Input: {"query": "XAgent architecture"}
+          Result: Found 5 relevant documents...
+
+        Step 2:
+          Thought: Now I should read the main document
+          Tool: FileSystemEnv.read
+          Input: {"path": "docs/architecture.md"}
+          Result: File content...
+        ...
+        """
+        ↓
+┌────────────────────────────────────────────────────────────────┐
+│ STEP 6: LLM Call with Function                                │
+└────────────────────────────────────────────────────────────────┘
+        ReflectAgent.parse()
+        ├─ Call LLM with filled prompts
+        ├─ Function: generate_posterior_knowledge
+        └─ Extract response
+        ↓
+┌────────────────────────────────────────────────────────────────┐
+│ STEP 7: Parse LLM Response                                    │
+└────────────────────────────────────────────────────────────────┘
+        Response format (from generate_posterior_knowledge.yml):
+        {
+          "summary": "Concise summary of subtask execution...",
+          "reflection_of_plan": [
+            "Plan should include X step earlier",
+            "Subtask Y was unnecessary",
+            "Could combine Z and W subtasks"
+          ],
+          "reflection_of_tool": [
+            {
+              "target_tool_name": "WebSearch",
+              "reflection": [
+                "Need to provide 'max_results' parameter",
+                "Works better with specific queries"
+              ]
+            },
+            {
+              "target_tool_name": "FileSystemEnv.write",
+              "reflection": [
+                "Must create parent directory first",
+                "Path should be absolute"
+              ]
+            }
+          ]
+        }
+        ↓
+┌────────────────────────────────────────────────────────────────┐
+│ STEP 8: Update Task Data                                      │
+└────────────────────────────────────────────────────────────────┘
+        now_dealing_task.data.update({
+            "posterior_knowledge": {
+                "summary": response["summary"],
+                "plan_reflection": response["reflection_of_plan"],
+                "tool_reflection": response["reflection_of_tool"]
+            }
+        })
+        ↓
+┌────────────────────────────────────────────────────────────────┐
+│ STEP 9: Register in Working Memory                            │
+└────────────────────────────────────────────────────────────────┘
+        WorkingMemoryAgent.register_task(now_dealing_task)
+        ├─ Store subtask result
+        ├─ Store posterior knowledge
+        └─ Make available for future subtasks
+        ↓
+OUTPUT DATA:
+┌────────────────────────────────────────────────────────────────┐
+│ Posterior Knowledge (stored in task data)                     │
+│ ├─ summary: Concise execution summary                         │
+│ ├─ plan_reflection: List of planning insights                 │
+│ └─ tool_reflection: List of tool usage insights               │
+│                                                                │
+│ Working Memory Entry:                                          │
+│ ├─ task_id: subtask_id                                        │
+│ ├─ status: SUCCESS/FAILED                                     │
+│ ├─ data: Complete task data with reflections                  │
+│ └─ Available for: chat_with_other_subtask function            │
+└────────────────────────────────────────────────────────────────┘
+
+DATA PASSED TO NEXT STAGE:
+→ Posterior knowledge (summary + reflections)
+→ Updated task in working memory
+→ Insights for future planning and execution
+```
+
+---
+
+### Pipeline 4: Plan Refine Pipeline
+
+**Цель:** Уточнить план на основе результатов выполнения подзадачи и предложений агента.
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                     PLAN REFINE PIPELINE                            │
+│                  (Iterative Plan Modification)                      │
+└─────────────────────────────────────────────────────────────────────┘
+
+INPUT DATA:
+┌────────────────────────────────────────────────────────────────┐
+│ Plan Refinement Trigger                                        │
+│ ├─ now_dealing_task: Just completed subtask                   │
+│ │   ├─ suggestions_for_latter_subtasks_plan:                  │
+│ │   │   ├─ need_for_plan_refine: true                        │
+│ │   │   └─ reason: "Detailed suggestions..."                 │
+│ │   └─ status: SUCCESS/FAILED                                 │
+│ │                                                              │
+│ ├─ current_plan: Complete plan tree                           │
+│ ├─ workspace_files: Current workspace structure                │
+│ └─ config:                                                     │
+│     ├─ max_plan_refine_chain_length: 4 (max iterations)       │
+│     ├─ max_plan_tree_width: 5 (max children per node)         │
+│     └─ max_plan_tree_depth: 3 (max tree depth)                │
+└────────────────────────────────────────────────────────────────┘
+        ↓
+┌────────────────────────────────────────────────────────────────┐
+│ STEP 1: Check Refinement Need                                 │
+└────────────────────────────────────────────────────────────────┘
+        if search_method.need_for_plan_refine == false:
+            → Skip refinement, go to next subtask
+        else:
+            → Continue to refinement
+        ↓
+┌────────────────────────────────────────────────────────────────┐
+│ STEP 2: Initialize Plan Refine Mode                           │
+└────────────────────────────────────────────────────────────────┘
+        PlanAgent.plan_refine_mode(now_dealing_task)
+        ├─ Create PlanRefineChain (history)
+        └─ Set modify_steps = 0
+        ↓
+┌────────────────────────────────────────────────────────────────┐
+│ STEP 3: Dispatch Plan Refine Agent                            │
+└────────────────────────────────────────────────────────────────┘
+        AgentDispatcher.dispatch(RequiredAbilities.plan_refinement)
+        ↓
+┌────────────────────────────────────────────────────────────────┐
+│ STEP 4: Iterative Refinement Loop                             │
+└────────────────────────────────────────────────────────────────┘
+        while modify_steps < max_plan_refine_chain_length:
+            ↓
+        ┌──────────────────────────────────────────────────────┐
+        │ STEP 4a: Prepare System Prompt                       │
+        └──────────────────────────────────────────────────────┘
+            SYSTEM_PROMPT (from plan_refine_agent/prompt.py):
+            ┌──────────────────────────────────────────────────┐
+            │ You are plan-rectify agent                        │
+            │ Task: Iteratively rectify plan of a query         │
+            │                                                   │
+            │ Background Information:                            │
+            │ PLAN STRUCTURE:                                    │
+            │ - Tree: 1, 1.1, 1.2, 1.2.1, etc.                 │
+            │ - Max width: {{max_plan_tree_width}} (e.g., 4)  │
+            │    ← FILLED WITH: config value                   │
+            │ - Max depth: {{max_plan_tree_depth}} (e.g., 3)  │
+            │    ← FILLED WITH: config value                   │
+            │                                                   │
+            │ SUBTASK FORMAT:                                    │
+            │ {                                                 │
+            │   "subtask name": string,                         │
+            │   "goal": {goal, criticism},                      │
+            │   "milestones": list[string]                      │
+            │ }                                                 │
+            │                                                   │
+            │ RESOURCES: Internet, FileSystem, Python, Shell    │
+            │                                                   │
+            │ PLAN_REFINE_MODE OPERATIONS:                      │
+            │                                                   │
+            │ - split: Split failed leaf subtask into 2-4 new   │
+            │   Example: split 1.2 → creates 1.2.1, 1.2.2      │
+            │                                                   │
+            │ - add: Add brother nodes to target subtask        │
+            │   Example: add after 1.1 → creates 1.2, 1.3      │
+            │                                                   │
+            │ - delete: Remove future/TODO subtask              │
+            │   Example: delete 1.2.1                           │
+            │                                                   │
+            │ - exit: Exit PLAN_REFINE_MODE                     │
+            │                                                   │
+            │ Important Notice:                                  │
+            │ - Never change subtasks before handling position  │
+            │ - Never create duplicate subtasks                 │
+            │ - Group similar goals in one subtask              │
+            │ - Maintain hierarchy structure                    │
+            │ - Max 4 operations before forced exit             │
+            │ - Use LLM capabilities, minimize complexity        │
+            └──────────────────────────────────────────────────┘
+            ↓
+        ┌──────────────────────────────────────────────────────┐
+        │ STEP 4b: Prepare User Prompt                         │
+        └──────────────────────────────────────────────────────┘
+            USER_PROMPT (from plan_refine_agent/prompt.py):
+            ┌──────────────────────────────────────────────────┐
+            │ Your task: choose one SUBTASK OPERATION           │
+            │                                                   │
+            │ Constraints:                                       │
+            │ 1. Only modify subtask_id > {{subtask_id}}       │
+            │    ← FILLED WITH: now_dealing_task.subtask_id    │
+            │                                                   │
+            │ 2. If plan is good enough, use REFINE_SUBMIT      │
+            │                                                   │
+            │ 3. Budget: {{max_step}} operations max,          │
+            │    already made {{modify_steps}} steps           │
+            │    ← FILLED WITH: 4 and current count            │
+            │                                                   │
+            │ 4. Max depth: {{max_plan_tree_depth}}            │
+            │    Be careful when using SUBTASK_SPLIT            │
+            │                                                   │
+            │ 5. Please use function call to respond!!!         │
+            │                                                   │
+            │ --- Status ---                                    │
+            │ File System Structure: {{workspace_files}}       │
+            │    ← FILLED WITH: workspace tree                 │
+            │                                                   │
+            │ Refine Node Message: {{refine_node_message}}     │
+            │    ← FILLED WITH: suggestions from subtask       │
+            └──────────────────────────────────────────────────┘
+            ↓
+        ┌──────────────────────────────────────────────────────┐
+        │ STEP 4c: LLM Call with Function                      │
+        └──────────────────────────────────────────────────────┘
+            PlanRefineAgent.parse()
+            ├─ Call LLM with filled prompts
+            ├─ Function: subtask_operations
+            └─ Extract response
+            ↓
+        ┌──────────────────────────────────────────────────────┐
+        │ STEP 4d: Parse Operation                             │
+        └──────────────────────────────────────────────────────┘
+            Response format (from task_manage_functions.yml):
+            {
+              "operation": "split" | "add" | "delete" | "exit",
+              "target_subtask_id": "1.2",
+              "subtasks": [
+                {
+                  "subtask name": "New Subtask 1",
+                  "goal": {
+                    "goal": "What to achieve...",
+                    "criticism": "Potential problems..."
+                  },
+                  "milestones": ["Milestone 1", ...]
+                },
+                ... (if operation is split or add)
+              ]
+            }
+            ↓
+        ┌──────────────────────────────────────────────────────┐
+        │ STEP 4e: Execute Operation                           │
+        └──────────────────────────────────────────────────────┘
+            ┌──────────────────────────────────────────────────┐
+            │ if operation == "split":                          │
+            └──────────────────────────────────────────────────┘
+                Validate:
+                ├─ target_subtask exists
+                ├─ target is leaf node (no children)
+                ├─ target is failed task
+                └─ new depth < max_plan_tree_depth
+                ↓
+                Execute:
+                ├─ Get target node from plan tree
+                ├─ For each new subtask:
+                │   ├─ Create Plan node
+                │   ├─ Set subtask_id (target_id.1, .2, .3)
+                │   ├─ Set goal, milestones, criticism
+                │   └─ Set status = TODO
+                └─ Plan.make_relation(target, new_subtasks)
+
+            ┌──────────────────────────────────────────────────┐
+            │ elif operation == "add":                          │
+            └──────────────────────────────────────────────────┘
+                Validate:
+                ├─ target_subtask exists
+                ├─ target is current or future subtask
+                └─ new width <= max_plan_tree_width
+                ↓
+                Execute:
+                ├─ Get parent of target
+                ├─ Get current last sibling index
+                ├─ For each new subtask:
+                │   ├─ Create Plan node
+                │   ├─ Set subtask_id (parent_id.next_index)
+                │   ├─ Set goal, milestones, criticism
+                │   └─ Set status = TODO
+                └─ Plan.make_relation(parent, new_subtasks)
+
+            ┌──────────────────────────────────────────────────┐
+            │ elif operation == "delete":                       │
+            └──────────────────────────────────────────────────┘
+                Validate:
+                ├─ target_subtask exists
+                └─ target is future/TODO subtask (not done/doing)
+                ↓
+                Execute:
+                └─ Plan.remove_subtask(target_subtask_id)
+
+            ┌──────────────────────────────────────────────────┐
+            │ elif operation == "exit":                         │
+            └──────────────────────────────────────────────────┘
+                Exit refinement mode
+                Break loop
+            ↓
+        ┌──────────────────────────────────────────────────────┐
+        │ STEP 4f: Record Operation                            │
+        └──────────────────────────────────────────────────────┘
+            PlanRefineChain.add_refinement({
+                "operation": operation,
+                "target": target_subtask_id,
+                "changes": subtasks,
+                "step": modify_steps
+            })
+            ↓
+            modify_steps += 1
+            ↓
+            if operation == "exit" or modify_steps >= max:
+                Break loop
+            else:
+                Continue to next iteration
+        ↓
+┌────────────────────────────────────────────────────────────────┐
+│ STEP 5: Finalize Refinement                                   │
+└────────────────────────────────────────────────────────────────┘
+        Updated plan tree with:
+        ├─ New subtasks (from split/add)
+        ├─ Removed subtasks (from delete)
+        └─ Maintained hierarchy and constraints
+        ↓
+OUTPUT DATA:
+┌────────────────────────────────────────────────────────────────┐
+│ Modified Plan Tree                                             │
+│ Example after split operation on failed subtask 2:            │
+│ root                                                           │
+│  ├─ 1: Subtask 1 (DONE)                                       │
+│  ├─ 2: Subtask 2 (FAILED) ← Split into:                       │
+│  │   ├─ 2.1: Sub-subtask 1 (TODO)                            │
+│  │   ├─ 2.2: Sub-subtask 2 (TODO)                            │
+│  │   └─ 2.3: Sub-subtask 3 (TODO)                            │
+│  └─ 3: Subtask 3 (TODO)                                       │
+│                                                                │
+│ PlanRefineChain History:                                       │
+│ ├─ Refinement 1: split 2 into 2.1, 2.2, 2.3                  │
+│ └─ (up to 4 refinements)                                      │
+└────────────────────────────────────────────────────────────────┘
+
+DATA PASSED TO NEXT STAGE:
+→ Updated plan tree with refined subtasks
+→ Next subtask to execute (Plan.pop_next_subtask)
+→ Refinement history
+```
+
 ---
 
 ## Detailed Agent Interactions
